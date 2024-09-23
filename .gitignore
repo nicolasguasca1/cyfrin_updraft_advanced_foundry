@@ -1,0 +1,4 @@
+# Files to ignore
+node_modules
+dist
+/foundry-defi-stablecoing-f23
