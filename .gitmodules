@@ -1,0 +1,3 @@
+[submodule "foundry-defi-stablecoin-cu/lib/forge-std"]
+	path = foundry-defi-stablecoin-cu/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
