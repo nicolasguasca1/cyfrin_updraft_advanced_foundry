@@ -133,8 +133,8 @@ contract DSCEngineTest is Test {
 
     function testRevertsIfMintBreaksHealthFactor() public depositedCollateral {
         vm.startPrank(USER);
-        uint256 amountDscToMint = 1000e18; // Large amount to break health factor
-        vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, 0));
+        uint256 amountDscToMint = 10001e18; // Large amount to break health factor
+        vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, 999900009999000099));
         dsce.mintDsc(amountDscToMint);
         vm.stopPrank();
     }

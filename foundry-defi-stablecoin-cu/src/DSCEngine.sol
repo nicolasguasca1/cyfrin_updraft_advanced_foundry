@@ -342,7 +342,8 @@ contract DSCEngine is ReentrancyGuard {
 
         // $1000 ETH equivalent to 100 DSC
         // 1000 * 50 = 50000 / 100 = 500 -> 500 / 100 = 5 -------High health factor
-        return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
+        console.log("healthyy", (collateralAdjustedForThreshold * PRECISION/ totalDscMinted));
+        return (collateralAdjustedForThreshold * PRECISION / totalDscMinted);
     }
     function _revertIfHealthFactorIsBroken(address user) internal view {
         // 1. Check health factor (do they have enough collateral?)
