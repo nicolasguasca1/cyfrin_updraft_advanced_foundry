@@ -2,6 +2,9 @@
 
 pragma solidity 0.8.20;
 
+import {console} from "lib/forge-std/src/console.sol";
+
+
 import {Test} from "lib/forge-std/src/Test.sol";
 import {DeployDSC} from "script/DeployDSC.s.sol";
 import {DecentralizedStableCoin} from "src/DecentralizedStableCoin.sol";
@@ -62,9 +65,10 @@ contract DSCEngineTest is Test {
 
     function testGetTokenAmountFromUsd() public view {
         uint256 usdAmount = 100;
+        uint256 usdAmountInWei = usdAmount * 1e18;
         // $2,000 / ETH, $100
         uint256 expectedWeth = 0.05 ether;
-        uint256 actualWeth = dsce.getTokenAmountFromUsd(weth, usdAmount);
+        uint256 actualWeth = dsce.getTokenAmountFromUsd(weth, usdAmountInWei);
         assertEq(expectedWeth, actualWeth);
     }
 
@@ -102,11 +106,17 @@ contract DSCEngineTest is Test {
 
     function testCanDepositCollateralAndGetAccountInfo() public depositedCollateral {
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(USER);
+        console.log("totalDscMinted", totalDscMinted);
+        console.log("collateralValueInUsd", collateralValueInUsd);
 
+        // 10.000000000000000000 eth as colateral
+        // 100000000000.00000000000000000000000000
         uint256 expectedTotalDscMinted = 0;
-        uint256 expectedCollateralValueInUsd = dsce.getTokenAmountFromUsd(weth, collateralValueInUsd);
+        console.log("expectedTotalDscMinted", expectedTotalDscMinted);
+        uint256 expectedDepositAmount = dsce.getTokenAmountFromUsd(weth, collateralValueInUsd);
+        console.log("expectedDepositAmount", expectedDepositAmount);
         assertEq(totalDscMinted, expectedTotalDscMinted);
-        assertEq(collateralValueInUsd, expectedCollateralValueInUsd);
+        assertEq(AMOUNT_COLLATERAL, expectedDepositAmount);
 
     }
 
@@ -135,6 +145,17 @@ contract DSCEngineTest is Test {
         dsce.mintDsc(amountDscToMint);
         (uint256 totalDscMinted, ) = dsce.getAccountInformation(USER);
         assertEq(totalDscMinted, amountDscToMint);
+        vm.stopPrank();
+    }
+
+    ////////////////////////////////////
+    // redeemCollateral Tests /////////
+    ////////////////////////////////////
+
+    function testRevertsIfRedeemZero() public {
+        vm.startPrank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__NeedsMoreThanZero.selector);
+        dsce.redeemCollateral(weth, 0);
         vm.stopPrank();
     }
 }

@@ -25,6 +25,8 @@
 
 pragma solidity ^0.8.20;
 
+import {console} from "lib/forge-std/src/console.sol";
+
 import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -166,11 +168,14 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant 
         {
             s_collateralDeposited[msg.sender][tokenCollateralAddress] += amountCollateral;
+            console.log("collaterl of", msg.sender);
+            console.log("IS: ",s_collateralDeposited[msg.sender][tokenCollateralAddress]);
             emit CollateralDeposited(msg.sender, tokenCollateralAddress, amountCollateral);
             bool success = IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), amountCollateral);
             if (!success) {
                 revert DSCEngine__TransferFailed();
             }
+            console.log("balance of this contract: ", IERC20(tokenCollateralAddress).balanceOf(address(this)));
         }
 
     /**
@@ -207,6 +212,8 @@ contract DSCEngine is ReentrancyGuard {
     function mintDsc(uint256 amountDscToMint) public moreThanZero(amountDscToMint) nonReentrant {
         s_DSCMinted[msg.sender] += amountDscToMint;
         // if they minted too much ($150 DSC, $100 ETH)
+                console.log("useri", _healthFactor(msg.sender));
+
         _revertIfHealthFactorIsBroken(msg.sender);
         bool minted = i_dsc.mint(msg.sender, amountDscToMint);
         if (!minted) {
@@ -306,9 +313,14 @@ contract DSCEngine is ReentrancyGuard {
 
     function _getAccountInformation(address user) private view returns (uint256 totalDscMinted, uint256 collateralValueInUsd) {
         // total DSC minted
+        // CONSOLE USER
+        console.log("userxx", user);
         totalDscMinted = s_DSCMinted[user];
+        console.log("totalDscMintedXX", totalDscMinted);
         collateralValueInUsd = getAccountCollateralValue(user);
+        console.log("collateralValueInUsdXX", collateralValueInUsd);
         return (totalDscMinted, collateralValueInUsd);
+        // BUG IS HERE!!!!!!!!!!
     }
 
     /**º
@@ -321,6 +333,9 @@ contract DSCEngine is ReentrancyGuard {
         // total DSC minted
         // total collateral VALUE
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
+        console.log("User is", user);
+        console.log("totalDscMinted", totalDscMinted);
+        console.log("collateralValueInUsd", collateralValueInUsd);
         uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
         // $150 ETH / 100 DSC = 1.5
         // 150 * 50 = 7500 / 100 = 75 -> 75 / 100 < 1 -------Low health factor
@@ -354,18 +369,20 @@ contract DSCEngine is ReentrancyGuard {
         // $2000 / ETH. $1000 = 0.5 ETH
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
         (, int price,,,) = priceFeed.latestRoundData();
-        return ((usdAmount * PRECISION) / uint256(price)) * ADDITIONAL_FEED_PRECISION;
+        return ((usdAmount) / uint256(price)) * ADDITIONAL_FEED_PRECISION;
     }
 
     function getAccountCollateralValue(address user) public view returns (uint256 totalCollateralValue) {
-        // loop through each collateral token, get the amount they have deposited, and map it to the price, to get the USD value
+        // loop through each collatera
+        //BUG IS HERE!!!!!!!!!!l token, get the amount they have deposited, and map it to the price, to get the USD value
         uint256 totalCollateralValueInUsd = 0;
         for (uint256 i=0; i<s_collateralTokens.length; i++) {
             address token = s_collateralTokens[i];
             uint256 amount = s_collateralDeposited[user][token];
+
             totalCollateralValueInUsd += getUsdValue(token, amount);
         }
-        return totalCollateralValue;
+        return totalCollateralValueInUsd;
     }
 
     function getAccountInformation(address user) external view returns (uint256 totalDscMinted, uint256 collateralValueInUsd) {
