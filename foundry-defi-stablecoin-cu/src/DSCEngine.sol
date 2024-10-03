@@ -69,6 +69,7 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__MintFailed();
     error DSCEngine__HealthFactorOk();
     error DSCEngine__HealthFactorNotImproved();
+    error DSCEngine__CanOnlyLiquidateAmountCollateral();
 
     ////////////////////////
     // State Variables    //
@@ -168,8 +169,8 @@ contract DSCEngine is ReentrancyGuard {
         nonReentrant 
         {
             s_collateralDeposited[msg.sender][tokenCollateralAddress] += amountCollateral;
-            console.log("collaterl of", msg.sender);
-            console.log("IS: ",s_collateralDeposited[msg.sender][tokenCollateralAddress]);
+            console.log("sender in depcollateral is", msg.sender);
+            console.log("colateral depositado: ",s_collateralDeposited[msg.sender][tokenCollateralAddress]);
             emit CollateralDeposited(msg.sender, tokenCollateralAddress, amountCollateral);
             bool success = IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), amountCollateral);
             if (!success) {
@@ -212,7 +213,7 @@ contract DSCEngine is ReentrancyGuard {
     function mintDsc(uint256 amountDscToMint) public moreThanZero(amountDscToMint) nonReentrant {
         s_DSCMinted[msg.sender] += amountDscToMint;
         // if they minted too much ($150 DSC, $100 ETH)
-                console.log("useri", _healthFactor(msg.sender));
+                console.log("user during mintDsc", _healthFactor(msg.sender));
 
         _revertIfHealthFactorIsBroken(msg.sender);
         bool minted = i_dsc.mint(msg.sender, amountDscToMint);
@@ -262,6 +263,7 @@ contract DSCEngine is ReentrancyGuard {
         // debtToCover = $100 DSC
         // $100 of DSC == ??? ETH
         uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(collateral, debtToCover);
+        console.log("tokenAmountFromDebtCovered", tokenAmountFromDebtCovered); // 5e18 -> 5 ETH
         // And give them a 10% bonus
         // So we're giving the liquidator $110 of WETH for 100 DSC
         //We should implement a feature to liquidate in the event the protocol is insolvent 
@@ -269,11 +271,13 @@ contract DSCEngine is ReentrancyGuard {
 
         // 0.05 * 0.1 = 0.005. Getting 0.055
         uint256 bonusCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
+        console.log("bonusCollateral", bonusCollateral);
         uint256 totalCollateralToredeem = tokenAmountFromDebtCovered + bonusCollateral;
+        console.log("totalCollateralToredeem", totalCollateralToredeem); // 5.5e18
         _redeemCollateral(user, msg.sender, collateral, totalCollateralToredeem);
-        // We need to burn the DSC
         _burnDsc(debtToCover, user, msg.sender);
         uint256 endingUserHealthFactor = _healthFactor(user);
+        console.log("endingUserHealthFactor", endingUserHealthFactor);
         if (endingUserHealthFactor <= startingUserHealthFactor) {
             revert DSCEngine__HealthFactorNotImproved();
         }
@@ -292,6 +296,7 @@ contract DSCEngine is ReentrancyGuard {
      * @param amountDscToBurn The amount of DSC to burn
      */
     function _burnDsc(uint256 amountDscToBurn, address onBehalfOf, address dscFrom) private {
+        console.log("Allowance of DSC to DSCEngine from burn func", DecentralizedStableCoin(i_dsc).allowance(dscFrom, address(this)));
         s_DSCMinted[onBehalfOf] -= amountDscToBurn;
         bool success = i_dsc.transferFrom(dscFrom, address(this),amountDscToBurn);
         if (!success) {
@@ -301,10 +306,23 @@ contract DSCEngine is ReentrancyGuard {
     } 
 
     function _redeemCollateral(address from, address to, address tokenCollateralAddress, uint256 amountCollateral) internal {
+        // Handle the case if amountCollateral > s_collateralDeposited[from][tokenCollateralAddress]
+        // log the amount of collateral deposited
+        console.log("amountCollateral on loser account", s_collateralDeposited[from][tokenCollateralAddress]); // 10e18
+        if (amountCollateral > s_collateralDeposited[from][tokenCollateralAddress]) {
+            revert DSCEngine__CanOnlyLiquidateAmountCollateral();
+        }
         s_collateralDeposited[from][tokenCollateralAddress] -= amountCollateral;
+        console.log("amountCollateral on loser account after", s_collateralDeposited[from][tokenCollateralAddress]); // 4.5e18
         emit CollateralRedeemed(from,to,tokenCollateralAddress,amountCollateral);
         // _calculateHealthFactorAfter()
+        // log the amount of collateral to be sent to the winner
+        // Check allowance after approval
         bool success = IERC20(tokenCollateralAddress).transfer(to, amountCollateral);
+        s_collateralDeposited[to][tokenCollateralAddress] += amountCollateral;
+
+        
+        console.log("amountCollateral on winner account", s_collateralDeposited[to][tokenCollateralAddress]); // 5.5e18
         if (!success) {
             revert DSCEngine__TransferFailed();
         }
@@ -342,7 +360,11 @@ contract DSCEngine is ReentrancyGuard {
 
         // $1000 ETH equivalent to 100 DSC
         // 1000 * 50 = 50000 / 100 = 500 -> 500 / 100 = 5 -------High health factor
-        console.log("healthyy", (collateralAdjustedForThreshold * PRECISION/ totalDscMinted));
+        // console.log("healthyy", (collateralAdjustedForThreshold * PRECISION/ totalDscMinted));
+        if (totalDscMinted == 0) {
+            return type(uint256).max;  // Maximum value for uint256, meaning no risk
+        }
+        console.log("healthFactor is", (collateralAdjustedForThreshold * PRECISION / totalDscMinted));
         return (collateralAdjustedForThreshold * PRECISION / totalDscMinted);
     }
     function _revertIfHealthFactorIsBroken(address user) internal view {
@@ -364,12 +386,20 @@ contract DSCEngine is ReentrancyGuard {
         return (uint256(price)* amount) / ADDITIONAL_FEED_PRECISION;
     }
 
+    /**
+     * @notice
+     * This function allows a user to get the amount of tokens they can get for a certain amount of USD
+     * @param token The address of the token to get the amount of
+     * @param usdAmount The amount of USD to get the token amount for
+     */
     function getTokenAmountFromUsd(address token, uint256 usdAmount) public view returns (uint256) {
         // price of ETH (token)
         // $/ETH ETH?
         // $2000 / ETH. $1000 = 0.5 ETH
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
         (, int price,,,) = priceFeed.latestRoundData();
+        // log the price
+        console.log("price from getTokenAmountFromUsd", price);
         return ((usdAmount) / uint256(price)) * ADDITIONAL_FEED_PRECISION;
     }
 
