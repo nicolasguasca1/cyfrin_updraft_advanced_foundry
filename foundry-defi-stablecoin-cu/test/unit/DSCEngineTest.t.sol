@@ -14,6 +14,7 @@ import {HelperConfig} from "script/HelperConfig.s.sol";
 import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 
 import {FailingERC20Mock} from "../mocks/FailingERC20Mock.sol";
+import {FailingDecentralizedStableCoin} from "../mocks/FailingDecentralizedStableCoin.sol";
 
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
@@ -429,6 +430,38 @@ contract DSCEngineTest is Test {
 
         vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
         newDsce2.burnDsc(1e18); // Attempt to burn DSC
+        vm.stopPrank();
+    }
+
+    // Function to test that the mintDsc function reverts if the transferFrom function fails
+    function testMintDscTransferFailed() public {
+        FailingERC20Mock failingToken = new FailingERC20Mock("FailingToken", "FTK", address(this), AMOUNT_COLLATERAL);
+        failingToken.mint(USER, AMOUNT_COLLATERAL);
+
+        // Step 2: Add the token to the allowed tokens mapping in the DSCEngine contract
+        address[] memory tokenAddresses2 = new address[](1);
+        address[] memory priceFeedAddresses2 = new address[](1);
+        tokenAddresses2[0] = address(failingToken);
+        priceFeedAddresses2[0] = ethUsdPriceFeed; // Use an existing price feed for simplicity
+        DSCEngine newDsce2 = new DSCEngine(tokenAddresses2, priceFeedAddresses2, address(failingToken));
+
+        vm.startPrank(address(dsce)); // Simulate the owner
+        // console the owner of dsc
+        dsc.transferOwnership(address(newDsce2));
+        vm.stopPrank(); 
+
+        vm.startPrank(USER);
+        failingToken.approve(address(newDsce2), AMOUNT_COLLATERAL);
+        // Approve allowance of dsc to dsce
+        DecentralizedStableCoin(dsc).approve(address(newDsce2), 1e18);
+
+        // newDsce2.depositCollateralAndMintDsc(address(failingToken), AMOUNT_COLLATERAL, AMOUNT_DSC); 
+
+        newDsce2.depositCollateral(address(failingToken), AMOUNT_COLLATERAL);
+        failingToken.setShouldFail(true);
+
+        vm.expectRevert(DSCEngine.DSCEngine__MintFailed.selector);
+        newDsce2.mintDsc(1e18); // Mint a small amount of DSC
         vm.stopPrank();
     }
 }

@@ -20,4 +20,10 @@ contract FailingERC20Mock is ERC20Mock {
         }
         return super.transferFrom(sender, recipient, amount);
     }
+    function mint(address account, uint256 amount) public override returns (bool) {
+        if (shouldFail) {
+            return false;
+        }
+        return super.mint(account, amount);
+    }
 }
