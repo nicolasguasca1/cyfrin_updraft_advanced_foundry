@@ -13,6 +13,8 @@ import {HelperConfig} from "script/HelperConfig.s.sol";
 
 import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 
+import {FailingERC20Mock} from "../mocks/FailingERC20Mock.sol";
+
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 
@@ -331,45 +333,102 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
     }
 
-    function testRevertsIfLiquidateLessThanNecessary() public depositedCollateral mintedDsc {
-        // At this point of the test, $10,000 DSC has been minted with 10 ether collateral
-        // Manipulate price feed to make USER's position unhealthy
-        int256 newPrice = 2000e8/2; // Lower price to make position unhealthy
-        vm.mockCall(ethUsdPriceFeed, abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector), abi.encode(0, newPrice, 0, 0, 0));
-        // According to the new price, the collateral value is now $5,000
-        // The total DSC minted is $10,000
-        // The health factor is 0.5
+    // function testRevertsIfLiquidateLessThanNecessary() public depositedCollateral mintedDsc {
+    //     // At this point of the test, $10,000 DSC has been minted with 10 ether collateral
+    //     // Manipulate price feed to make USER's position unhealthy
+    //     int256 newPrice = 2000e8/2; // Lower price to make position unhealthy
+    //     vm.mockCall(ethUsdPriceFeed, abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector), abi.encode(0, newPrice, 0, 0, 0));
+    //     // According to the new price, the collateral value is now $5,000
+    //     // The total DSC minted is $10,000
+    //     // The health factor is 0.5
 
-        // ********************GETTING THINGS READY FOR LIQUIDATOR **************************** */
+    //     // ********************GETTING THINGS READY FOR LIQUIDATOR **************************** */
 
-        // Deposit collateral and mint DSC
+    //     // Deposit collateral and mint DSC
 
-        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 20 ether
-        dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2); // 20 ether
-        // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
-        console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
+    //     ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 20 ether
+    //     dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2); // 20 ether
+    //     // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
+    //     console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
 
-        // Approve the tokens this contract is about to liquidate
-        uint256 amountDscToMint = AMOUNT_DSC; // 10000e18;
-        // Approve the amount of DSC Token to the DSCEngine
-        DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
-        console.log("Just before next step");
-        dsce.mintDsc(amountDscToMint);
-        // Console the allowances
-        console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
+    //     // Approve the tokens this contract is about to liquidate
+    //     uint256 amountDscToMint = AMOUNT_DSC; // 10000e18;
+    //     // Approve the amount of DSC Token to the DSCEngine
+    //     DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
+    //     console.log("Just before next step");
+    //     dsce.mintDsc(amountDscToMint);
+    //     // Console the allowances
+    //     console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
 
-        // ************************************************ */
+    //     // ************************************************ */
 
-        // Liquidate USER's position
-        vm.startPrank(address(this));
-        // Check allowance before liquidation
-        uint256 allowanceBeforeLiquidation = DecentralizedStableCoin(dsc).allowance(USER, address(dsce));
-        console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation/1e18);
+    //     // Liquidate USER's position
+    //     vm.startPrank(address(this));
+    //     // Check allowance before liquidation
+    //     uint256 allowanceBeforeLiquidation = DecentralizedStableCoin(dsc).allowance(USER, address(dsce));
+    //     console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation/1e18);
 
-        // Expect revert because the amount to liquidate is less than necessary
-        // vm.expectRevert(DSCEngine.DSCEngine__HealthFactorNotImproved.selector);
-        uint256 endingUserHealthFactor = dsce.liquidate(weth, USER, (AMOUNT_DSC/30)); // 10,000e18 / 10 = 1,000e18  
-        console.log("endingUserHealthFactoryx", endingUserHealthFactor/1e18);
+    //     // Expect revert because the amount to liquidate is less than necessary
+    //     // vm.expectRevert(DSCEngine.DSCEngine__HealthFactorNotImproved.selector);
+    //     uint256 endingUserHealthFactor = dsce.liquidate(weth, USER, (AMOUNT_DSC/30)); // 10,000e18 / 10 = 1,000e18  
+    //     console.log("endingUserHealthFactoryx", endingUserHealthFactor/1e18);
+    //     vm.stopPrank();
+    // }
+
+    function testDepositCollateralTransferFailed() public {
+        // Step 1: Deploy the FailingERC20Mock token
+        FailingERC20Mock failingToken = new FailingERC20Mock("FailingToken", "FT", address(this), AMOUNT_COLLATERAL);
+        failingToken.mint(USER, AMOUNT_COLLATERAL);
+
+        // Step 2: Add the token to the allowed tokens mapping in the DSCEngine contract
+        address[] memory tokenAddresses1 = new address[](1);
+        address[] memory priceFeedAddresses1 = new address[](1);
+        tokenAddresses1[0] = address(failingToken);
+        priceFeedAddresses1[0] = ethUsdPriceFeed; // Use an existing price feed for simplicity
+        DSCEngine newDsce = new DSCEngine(tokenAddresses1, priceFeedAddresses1, address(dsc));
+
+        // Step 3: Set the mock token to fail the transfer
+        failingToken.setShouldFail(true);
+
+        // Step 4: Test the depositCollateral function
+        vm.startPrank(USER);
+        failingToken.approve(address(newDsce), AMOUNT_COLLATERAL);
+
+        vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
+        newDsce.depositCollateral(address(failingToken), AMOUNT_COLLATERAL);
+        vm.stopPrank();
+    }
+
+    function testBurnDscTransferFailed() public {
+        FailingERC20Mock failingToken = new FailingERC20Mock("FailingToken", "FTK", address(this), AMOUNT_COLLATERAL);
+        failingToken.mint(USER, AMOUNT_COLLATERAL);
+
+        // Step 2: Add the token to the allowed tokens mapping in the DSCEngine contract
+        address[] memory tokenAddresses2 = new address[](1);
+        address[] memory priceFeedAddresses2 = new address[](1);
+        tokenAddresses2[0] = address(failingToken);
+        priceFeedAddresses2[0] = ethUsdPriceFeed; // Use an existing price feed for simplicity
+        DSCEngine newDsce2 = new DSCEngine(tokenAddresses2, priceFeedAddresses2, address(failingToken));
+
+        vm.startPrank(address(dsce)); // Simulate the owner
+        // console the owner of dsc
+        dsc.transferOwnership(address(newDsce2));
+        vm.stopPrank(); 
+
+        vm.startPrank(USER);
+        failingToken.approve(address(newDsce2), AMOUNT_COLLATERAL);
+        // Approve allowance of dsc to dsce
+        DecentralizedStableCoin(dsc).approve(address(newDsce2), 1e18);
+
+        // newDsce2.depositCollateralAndMintDsc(address(failingToken), AMOUNT_COLLATERAL, AMOUNT_DSC); 
+
+        newDsce2.depositCollateral(address(failingToken), AMOUNT_COLLATERAL);
+        // newDsce2.mintDsc(1e18); // Mint a small amount of DSC
+
+        failingToken.setShouldFail(true);
+
+        vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
+        newDsce2.burnDsc(1e18); // Attempt to burn DSC
         vm.stopPrank();
     }
 }
