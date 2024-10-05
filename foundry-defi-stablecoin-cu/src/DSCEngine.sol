@@ -300,7 +300,10 @@ contract DSCEngine is ReentrancyGuard {
         return debtToCover+(debtToCover/10) + amountToBurn;
     }
 
-    function getHealthFactor() external {}
+    // Function to get externally the health factor of a user   
+    function getHealthFactor(address sender) external view returns (uint256) {
+        return _healthFactor(sender);
+    }
 
     ///////////////////////////////////////
     // Private & Internal View Functions //
@@ -314,12 +317,12 @@ contract DSCEngine is ReentrancyGuard {
      */
     function _burnDsc(uint256 amountDscToBurn, address onBehalfOf, address dscFrom) private {
         console.log("Allowance of DSC to DSCEngine from burn func", DecentralizedStableCoin(i_dsc).allowance(dscFrom, address(this))/1e18);
-        console.log("amountDscToBurn", amountDscToBurn/1e18);
-        s_DSCMinted[onBehalfOf] -= amountDscToBurn;
         bool success = i_dsc.transferFrom(dscFrom, address(this),amountDscToBurn);
         if (!success) {
             revert DSCEngine__TransferFailed();
         }
+        console.log("amountDscToBurn", amountDscToBurn/1e18);
+        s_DSCMinted[onBehalfOf] -= amountDscToBurn;
         i_dsc.burn(amountDscToBurn);
     } 
 
