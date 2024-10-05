@@ -170,13 +170,13 @@ contract DSCEngine is ReentrancyGuard {
         {
             s_collateralDeposited[msg.sender][tokenCollateralAddress] += amountCollateral;
             console.log("sender in depcollateral is", msg.sender);
-            console.log("colateral depositado: ",s_collateralDeposited[msg.sender][tokenCollateralAddress]);
+            console.log("colateral depositado: ",s_collateralDeposited[msg.sender][tokenCollateralAddress]/1e18);
             emit CollateralDeposited(msg.sender, tokenCollateralAddress, amountCollateral);
             bool success = IERC20(tokenCollateralAddress).transferFrom(msg.sender, address(this), amountCollateral);
             if (!success) {
                 revert DSCEngine__TransferFailed();
             }
-            console.log("balance of this contract: ", IERC20(tokenCollateralAddress).balanceOf(address(this)));
+            console.log("balance of this contract: ", IERC20(tokenCollateralAddress).balanceOf(address(this))/1e18);
         }
 
     /**
@@ -213,7 +213,7 @@ contract DSCEngine is ReentrancyGuard {
     function mintDsc(uint256 amountDscToMint) public moreThanZero(amountDscToMint) nonReentrant {
         s_DSCMinted[msg.sender] += amountDscToMint;
         // if they minted too much ($150 DSC, $100 ETH)
-                console.log("user during mintDsc", _healthFactor(msg.sender));
+                console.log("user _healthFactor during mintDsc", _healthFactor(msg.sender)/1e18);
 
         _revertIfHealthFactorIsBroken(msg.sender);
         bool minted = i_dsc.mint(msg.sender, amountDscToMint);
@@ -251,9 +251,10 @@ contract DSCEngine is ReentrancyGuard {
     function liquidate(address collateral, address user, uint256 debtToCover) 
     external 
     moreThanZero(debtToCover)
-    nonReentrant {
+    nonReentrant returns (uint256) {
         // 1. Need to check health factor of user
         uint256 startingUserHealthFactor = _healthFactor(user);
+        console.log("startingUserHealthFactor", startingUserHealthFactor);
         if (startingUserHealthFactor >= MIN_HEALTH_FACTOR) {
             revert DSCEngine__HealthFactorOk();
         }
@@ -263,7 +264,7 @@ contract DSCEngine is ReentrancyGuard {
         // debtToCover = $100 DSC
         // $100 of DSC == ??? ETH
         uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(collateral, debtToCover);
-        console.log("tokenAmountFromDebtCovered", tokenAmountFromDebtCovered); // 5e18 -> 5 ETH
+        console.log("tokenAmountFromDebtCovered", tokenAmountFromDebtCovered/1e18); // 5e18 -> 5 ETH
         // And give them a 10% bonus
         // So we're giving the liquidator $110 of WETH for 100 DSC
         //We should implement a feature to liquidate in the event the protocol is insolvent 
@@ -271,16 +272,32 @@ contract DSCEngine is ReentrancyGuard {
 
         // 0.05 * 0.1 = 0.005. Getting 0.055
         uint256 bonusCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
-        console.log("bonusCollateral", bonusCollateral);
+        console.log("bonusCollateral", bonusCollateral/1e18);
         uint256 totalCollateralToredeem = tokenAmountFromDebtCovered + bonusCollateral;
-        console.log("totalCollateralToredeem", totalCollateralToredeem); // 5.5e18
+        console.log("totalCollateralToredeem", totalCollateralToredeem/1e18); // 5.5e18
         _redeemCollateral(user, msg.sender, collateral, totalCollateralToredeem);
-        _burnDsc(debtToCover, user, msg.sender);
+        console.log("debtToCover", debtToCover/1e18);
+        // _burnDsc(debtToCover + (debtToCover/10) + _calculateExactAmountToBurn(debtToCover,user), user, msg.sender);
+        uint256 amountToBurn = _calculateExactAmountToBurn(debtToCover,user);
+        _burnDsc(amountToBurn, user, msg.sender); // Considering the rough amount depending on the share of the dollateral being liquidated, the 10% bonus is added to the debt to cover and the exact amount to bring the health factor to 1
         uint256 endingUserHealthFactor = _healthFactor(user);
         console.log("endingUserHealthFactor", endingUserHealthFactor);
         if (endingUserHealthFactor <= startingUserHealthFactor) {
             revert DSCEngine__HealthFactorNotImproved();
         }
+        return endingUserHealthFactor;
+    }
+
+    // Function to calculate exact amount to get liquidation threshold
+    function _calculateExactAmountToBurn(uint256 debtToCover,address user) internal view returns (uint256){
+        (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
+        console.log("totalDscMintedu", totalDscMinted/1e18);
+        console.log("collateralValueInUsdu", collateralValueInUsd/1e18);
+        //TOTAL - x = COLLAR /2
+        // x = total - collate /2 
+        uint256 amountToBurn = (totalDscMinted - (collateralValueInUsd/2)) -debtToCover-(debtToCover/10);
+        console.log("amountToBurnu", amountToBurn/1e18);
+        return debtToCover+(debtToCover/10) + amountToBurn;
     }
 
     function getHealthFactor() external {}
@@ -296,7 +313,8 @@ contract DSCEngine is ReentrancyGuard {
      * @param amountDscToBurn The amount of DSC to burn
      */
     function _burnDsc(uint256 amountDscToBurn, address onBehalfOf, address dscFrom) private {
-        console.log("Allowance of DSC to DSCEngine from burn func", DecentralizedStableCoin(i_dsc).allowance(dscFrom, address(this)));
+        console.log("Allowance of DSC to DSCEngine from burn func", DecentralizedStableCoin(i_dsc).allowance(dscFrom, address(this))/1e18);
+        console.log("amountDscToBurn", amountDscToBurn/1e18);
         s_DSCMinted[onBehalfOf] -= amountDscToBurn;
         bool success = i_dsc.transferFrom(dscFrom, address(this),amountDscToBurn);
         if (!success) {
@@ -308,12 +326,12 @@ contract DSCEngine is ReentrancyGuard {
     function _redeemCollateral(address from, address to, address tokenCollateralAddress, uint256 amountCollateral) internal {
         // Handle the case if amountCollateral > s_collateralDeposited[from][tokenCollateralAddress]
         // log the amount of collateral deposited
-        console.log("amountCollateral on loser account", s_collateralDeposited[from][tokenCollateralAddress]); // 10e18
+        console.log("amountCollateral on loser account", s_collateralDeposited[from][tokenCollateralAddress]/1e18); // 10e18
         if (amountCollateral > s_collateralDeposited[from][tokenCollateralAddress]) {
             revert DSCEngine__CanOnlyLiquidateAmountCollateral();
         }
         s_collateralDeposited[from][tokenCollateralAddress] -= amountCollateral;
-        console.log("amountCollateral on loser account after", s_collateralDeposited[from][tokenCollateralAddress]); // 4.5e18
+        console.log("amountCollateral on loser account after", s_collateralDeposited[from][tokenCollateralAddress]/1e18); // 4.5e18
         emit CollateralRedeemed(from,to,tokenCollateralAddress,amountCollateral);
         // _calculateHealthFactorAfter()
         // log the amount of collateral to be sent to the winner
@@ -322,7 +340,7 @@ contract DSCEngine is ReentrancyGuard {
         s_collateralDeposited[to][tokenCollateralAddress] += amountCollateral;
 
         
-        console.log("amountCollateral on winner account", s_collateralDeposited[to][tokenCollateralAddress]); // 5.5e18
+        console.log("amountCollateral on winner account", s_collateralDeposited[to][tokenCollateralAddress]/1e18); // 5.5e18
         if (!success) {
             revert DSCEngine__TransferFailed();
         }
@@ -334,9 +352,9 @@ contract DSCEngine is ReentrancyGuard {
         // CONSOLE USER
         console.log("userxx", user);
         totalDscMinted = s_DSCMinted[user];
-        console.log("totalDscMintedXX", totalDscMinted);
+        console.log("totalDscMintedXX", totalDscMinted/1e18);
         collateralValueInUsd = getAccountCollateralValue(user);
-        console.log("collateralValueInUsdXX", collateralValueInUsd);
+        console.log("collateralValueInUsdXX", collateralValueInUsd/1e18);
         return (totalDscMinted, collateralValueInUsd);
         // BUG IS HERE!!!!!!!!!!
     }
@@ -352,8 +370,8 @@ contract DSCEngine is ReentrancyGuard {
         // total collateral VALUE
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
         console.log("User is", user);
-        console.log("totalDscMinted", totalDscMinted);
-        console.log("collateralValueInUsd", collateralValueInUsd);
+        console.log("totalDscMinted", totalDscMinted/1e18);
+        console.log("collateralValueInUsd", collateralValueInUsd/1e18);
         uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
         // $150 ETH / 100 DSC = 1.5
         // 150 * 50 = 7500 / 100 = 75 -> 75 / 100 < 1 -------Low health factor
@@ -364,7 +382,7 @@ contract DSCEngine is ReentrancyGuard {
         if (totalDscMinted == 0) {
             return type(uint256).max;  // Maximum value for uint256, meaning no risk
         }
-        console.log("healthFactor is", (collateralAdjustedForThreshold * PRECISION / totalDscMinted));
+        console.log("healthFactor is", (collateralAdjustedForThreshold * PRECISION / totalDscMinted)/1e18);
         return (collateralAdjustedForThreshold * PRECISION / totalDscMinted);
     }
     function _revertIfHealthFactorIsBroken(address user) internal view {
@@ -399,7 +417,7 @@ contract DSCEngine is ReentrancyGuard {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
         (, int price,,,) = priceFeed.latestRoundData();
         // log the price
-        console.log("price from getTokenAmountFromUsd", price);
+        console.log("price from getTokenAmountFromUsd", price/1e8);
         return ((usdAmount) / uint256(price)) * ADDITIONAL_FEED_PRECISION;
     }
 

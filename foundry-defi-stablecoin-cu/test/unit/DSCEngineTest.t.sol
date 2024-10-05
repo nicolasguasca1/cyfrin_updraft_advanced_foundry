@@ -105,7 +105,7 @@ contract DSCEngineTest is Test {
         ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL); // 10 ether
         dsce.depositCollateral(weth, AMOUNT_COLLATERAL);
         // At this point dscr cannot deposit more collateral because it has already deposited the maximum amount
-        console.log("Allowance of WETH to DSCEngine", ERC20Mock(weth).allowance(USER, address(dsce)));
+        console.log("Allowance of WETH to DSCEngine", ERC20Mock(weth).allowance(USER, address(dsce))/1e18);
         vm.stopPrank();
         _;
     }
@@ -118,7 +118,7 @@ contract DSCEngineTest is Test {
         DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
         dsce.mintDsc(amountDscToMint);
         // Console the allowances
-        console.log("Allowance of DSC to DSCEngine", DecentralizedStableCoin(dsc).allowance(USER, address(dsce)));
+        console.log("Allowance of DSC to DSCEngine", DecentralizedStableCoin(dsc).allowance(USER, address(dsce))/1e18);
 
         vm.stopPrank();
         _;
@@ -126,15 +126,15 @@ contract DSCEngineTest is Test {
 
     function testCanDepositCollateralAndGetAccountInfo() public depositedCollateral {
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(USER);
-        console.log("totalDscMinted", totalDscMinted);
-        console.log("collateralValueInUsd", collateralValueInUsd);
+        console.log("totalDscMinted", totalDscMinted/1e18);
+        console.log("collateralValueInUsd", collateralValueInUsd/1e18);
 
         // 10.000000000000000000 eth as colateral
         // 100000000000.00000000000000000000000000
         uint256 expectedTotalDscMinted = 0;
-        console.log("expectedTotalDscMinted", expectedTotalDscMinted);
+        console.log("expectedTotalDscMinted", expectedTotalDscMinted/1e18);
         uint256 expectedDepositAmount = dsce.getTokenAmountFromUsd(weth, collateralValueInUsd);
-        console.log("expectedDepositAmount", expectedDepositAmount);
+        console.log("expectedDepositAmount", expectedDepositAmount/1e18);
         assertEq(totalDscMinted, expectedTotalDscMinted);
         assertEq(AMOUNT_COLLATERAL, expectedDepositAmount);
 
@@ -232,10 +232,10 @@ contract DSCEngineTest is Test {
 
         // Deposit collateral and mint DSC
 
-        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 10 ether
-        dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2);
-        // At this point dscr cannot deposit more collateral because it has already deposited the maximum amount
-        console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce)));
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 20 ether
+        dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2); // 20 ether
+        // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
+        console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
 
         // Approve the tokens this contract is about to liquidate
         uint256 amountDscToMint = AMOUNT_DSC; // 10000e18;
@@ -244,7 +244,7 @@ contract DSCEngineTest is Test {
         console.log("Just before next step");
         dsce.mintDsc(amountDscToMint);
         // Console the allowances
-        console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce)));
+        console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
 
         // ************************************************ */
 
@@ -252,15 +252,13 @@ contract DSCEngineTest is Test {
         vm.startPrank(address(this));
         // Check allowance before liquidation
         uint256 allowanceBeforeLiquidation = DecentralizedStableCoin(dsc).allowance(USER, address(dsce));
-        console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation);
+        console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation/1e18);
 
-        dsce.liquidate(weth, USER, AMOUNT_DSC/2); // 10,000e18 / 2 = 5,000e18  
+        uint256 endingUserHealthFactor = dsce.liquidate(weth, USER, (AMOUNT_DSC/2)); // 10,000e18 / 2 = 5,000e18  
         vm.stopPrank();
 
         // Verify liquidation
-        (uint256 totalDscMinted, uint256 collateralValueInUsd) = dsce.getAccountInformation(USER);
-        assertEq(totalDscMinted, 0);
-        assertEq(collateralValueInUsd, 0);
+        assertEq(endingUserHealthFactor, 1e18); // 1 means healthy
     }
 }
 
