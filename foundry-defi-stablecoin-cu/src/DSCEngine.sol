@@ -302,6 +302,50 @@ contract DSCEngine is ReentrancyGuard {
     //     return debtToCover+(debtToCover/10) + amountToBurn; // 5000 + 500 + 2250
     // }
 
+    ///////////////////////////////////////////////
+    // External & Public View & Pure Functions ////
+    ///////////////////////////////////////////////
+
+    function getCollateralBalanceOfUser(address user, address token) external view returns (uint256) {
+        return s_collateralDeposited[user][token];
+    }
+
+    function getPrecision() external pure returns (uint256) {
+        return PRECISION;
+    }
+
+    function getAdditionalFeedPrecision() external pure returns (uint256) {
+        return ADDITIONAL_FEED_PRECISION;
+    }
+
+    function getLiquidationThreshold() external pure returns (uint256) {
+        return LIQUIDATION_THRESHOLD;
+    }
+
+    function getLiquidationBonus() external pure returns (uint256) {
+        return LIQUIDATION_BONUS;
+    }
+
+    function getLiquidationPrecision() external pure returns (uint256) {
+        return LIQUIDATION_PRECISION;
+    }
+
+    function getMinHealthFactor() external pure returns (uint256) {
+        return MIN_HEALTH_FACTOR;
+    }
+
+    function getCollateralTokens() external view returns (address[] memory) {
+        return s_collateralTokens;
+    }
+
+    function getDsc() external view returns (address) {
+        return address(i_dsc);
+    }
+
+    function getCollateralTokenPriceFeed(address token) external view returns (address) {
+        return s_priceFeeds[token];
+    }
+
     // Function to get externally the health factor of a user   
     function getHealthFactor(address sender) external view returns (uint256) {
         return _healthFactor(sender);
@@ -377,6 +421,13 @@ contract DSCEngine is ReentrancyGuard {
         console.log("User is", user);
         console.log("totalDscMinted", totalDscMinted/1e18);
         console.log("collateralValueInUsd", collateralValueInUsd/1e18);
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
+    }
+
+    function _calculateHealthFactor(uint256 totalDscMinted, uint256 collateralValueInUsd) internal pure returns (uint256) {
+        if (totalDscMinted == 0) {
+            return type(uint256).max;  // Maximum value for uint256, meaning no risk
+        }
         uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
         // $150 ETH / 100 DSC = 1.5
         // 150 * 50 = 7500 / 100 = 75 -> 75 / 100 < 1 -------Low health factor
@@ -384,12 +435,11 @@ contract DSCEngine is ReentrancyGuard {
         // $1000 ETH equivalent to 100 DSC
         // 1000 * 50 = 50000 / 100 = 500 -> 500 / 100 = 5 -------High health factor
         // console.log("healthyy", (collateralAdjustedForThreshold * PRECISION/ totalDscMinted));
-        if (totalDscMinted == 0) {
-            return type(uint256).max;  // Maximum value for uint256, meaning no risk
-        }
+        
         console.log("healthFactor is", (collateralAdjustedForThreshold * PRECISION / totalDscMinted)/1e18);
         return (collateralAdjustedForThreshold * PRECISION / totalDscMinted);
     }
+
     function _revertIfHealthFactorIsBroken(address user) internal view {
         // 1. Check health factor (do they have enough collateral?)
         // 2. If not, revert
@@ -403,9 +453,21 @@ contract DSCEngine is ReentrancyGuard {
     // Public & External View Functions //
     ///////////////////////////////////////
 
+    function calculateHealthFactor(
+        uint256 totalDscMinted,
+        uint256 collateralValueInUsd
+    )
+        external
+        pure
+        returns (uint256)
+    {
+        return _calculateHealthFactor(totalDscMinted, collateralValueInUsd);
+    }
+
     function getUsdValue(address token, uint256 amount) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_priceFeeds[token]);
         (, int price,,,) = priceFeed.latestRoundData();
+        console.log("price from getUsdValue", price);
         return (uint256(price)* amount) / ADDITIONAL_FEED_PRECISION;
     }
 
