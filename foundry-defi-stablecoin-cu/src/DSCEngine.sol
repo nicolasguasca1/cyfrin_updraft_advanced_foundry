@@ -277,9 +277,8 @@ contract DSCEngine is ReentrancyGuard {
         console.log("totalCollateralToredeem", totalCollateralToredeem/1e18); // 5.5e18
         _redeemCollateral(user, msg.sender, collateral, totalCollateralToredeem);
         console.log("debtToCover", debtToCover/1e18);
-        // _burnDsc(debtToCover + (debtToCover/10) + _calculateExactAmountToBurn(debtToCover,user), user, msg.sender);
-        uint256 amountToBurn = _calculateExactAmountToBurn(debtToCover,user);
-        _burnDsc(amountToBurn, user, msg.sender); // Considering the rough amount depending on the share of the dollateral being liquidated, the 10% bonus is added to the debt to cover and the exact amount to bring the health factor to 1
+        // uint256 amountToBurn = _calculateExactAmountToBurn(debtToCover,user);
+        _burnDsc(debtToCover, user, msg.sender); // Considering the rough amount depending on the share of the dollateral being liquidated, the 10% bonus is added to the debt to cover and the exact amount to bring the health factor to 1
         uint256 endingUserHealthFactor = _healthFactor(user);
         console.log("endingUserHealthFactor", endingUserHealthFactor);
         if (endingUserHealthFactor <= startingUserHealthFactor) {
@@ -288,17 +287,20 @@ contract DSCEngine is ReentrancyGuard {
         return endingUserHealthFactor;
     }
 
-    // Function to calculate exact amount to get liquidation threshold
-    function _calculateExactAmountToBurn(uint256 debtToCover,address user) internal view returns (uint256){
-        (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
-        console.log("totalDscMintedu", totalDscMinted/1e18);
-        console.log("collateralValueInUsdu", collateralValueInUsd/1e18);
-        //TOTAL - x = COLLAR /2
-        // x = total - collate /2 
-        uint256 amountToBurn = (totalDscMinted - (collateralValueInUsd/2)) -debtToCover-(debtToCover/10);
-        console.log("amountToBurnu", amountToBurn/1e18);
-        return debtToCover+(debtToCover/10) + amountToBurn;
-    }
+    // // Function to calculate exact amount to get liquidation threshold
+    // function _calculateExactAmountToBurn(uint256 debtToCover,address user) internal view returns (uint256){
+    //     if (debtToCover == 0) {
+    //         return 0;
+    //     }
+    //     (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
+    //     console.log("totalDscMintedu", totalDscMinted/1e18);
+    //     console.log("collateralValueInUsdu", collateralValueInUsd/1e18);
+    //     //TOTAL - x = COLLAR /2
+    //     // x = total - collate /2 
+    //     uint256 amountToBurn = (totalDscMinted - (collateralValueInUsd/2)) -debtToCover-(debtToCover/10); 
+    //     console.log("amountToBurnu", amountToBurn);
+    //     return debtToCover+(debtToCover/10) + amountToBurn; // 5000 + 500 + 2250
+    // }
 
     // Function to get externally the health factor of a user   
     function getHealthFactor(address sender) external view returns (uint256) {
