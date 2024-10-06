@@ -37,8 +37,12 @@ contract DSCEngineTest is Test {
     address public user = address(1);
     uint256 public constant AMOUNT_COLLATERAL = 10 ether; // In wei it would be 10e18 
     uint256 public constant AMOUNT_DSC = 10000e18;
-    uint256 public amountToMint = 100 ether;
+    uint256 public amountToMint = 100 ether; // $100. Simply expressed as Ether for simplicity
     uint256 public constant STARTING_ERC20_BALANCE = 10 ether;
+
+    // Liquidation
+    address public liquidator = makeAddr("liquidator");
+    uint256 public collateralToCover = 20 ether;
 
     function setUp() public {
         deployer = new DeployDSC();
@@ -66,16 +70,9 @@ contract DSCEngineTest is Test {
 
 
     ///////////////////////
-    // Price Test /////////
+    // Price Tests ////////
     ///////////////////////
 
-    function testGetUsdValue() public view {
-        uint256 ethAmount = 15e18;
-        // 15e18 * 2000/ETH = 30,000e18;
-        uint256 expectedUsd = 30000e18;
-        uint256 actualUsd = dsce.getUsdValue(weth, ethAmount);
-        assertEq(expectedUsd, actualUsd);
-    }
 
     function testGetTokenAmountFromUsd() public view {
         uint256 usdAmount = 100;
@@ -86,9 +83,41 @@ contract DSCEngineTest is Test {
         assertEq(expectedWeth, actualWeth);
     }
 
+    function testGetUsdValue() public view {
+        uint256 ethAmount = 15e18;
+        // 15e18 * 2000/ETH = 30,000e18;
+        uint256 expectedUsd = 30000e18;
+        uint256 actualUsd = dsce.getUsdValue(weth, ethAmount);
+        assertEq(expectedUsd, actualUsd);
+    }
+
     ////////////////////////////////////
     // depositCollateral Tests /////////
     ////////////////////////////////////
+
+    function testRevertsIfTransferFromFails() public {
+        // Step 1: Deploy the FailingERC20Mock token
+        FailingERC20Mock failingToken = new FailingERC20Mock("FailingToken", "FT", address(this), AMOUNT_COLLATERAL);
+        failingToken.mint(USER, AMOUNT_COLLATERAL);
+
+        // Step 2: Add the token to the allowed tokens mapping in the DSCEngine contract
+        address[] memory tokenAddresses1 = new address[](1);
+        address[] memory priceFeedAddresses1 = new address[](1);
+        tokenAddresses1[0] = address(failingToken);
+        priceFeedAddresses1[0] = ethUsdPriceFeed; // Use an existing price feed for simplicity
+        DSCEngine newDsce = new DSCEngine(tokenAddresses1, priceFeedAddresses1, address(dsc));
+
+        // Step 3: Set the mock token to fail the transfer
+        failingToken.setShouldFail(true);
+
+        // Step 4: Test the depositCollateral function
+        vm.startPrank(USER);
+        failingToken.approve(address(newDsce), AMOUNT_COLLATERAL);
+
+        vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
+        newDsce.depositCollateral(address(failingToken), AMOUNT_COLLATERAL);
+        vm.stopPrank();
+    }
 
     function testRevertsIfCollateralZero() public {
         vm.startPrank(USER);   
@@ -248,12 +277,6 @@ contract DSCEngineTest is Test {
         vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, expectedHealthFactor));
         dsce.mintDsc(amountToMint);
         vm.stopPrank();
-
-        // vm.startPrank(USER);
-        // uint256 amountDscToMint = 10001e18; // Large amount to break health factor
-        // vm.expectRevert(abi.encodeWithSelector(DSCEngine.DSCEngine__BreaksHealthFactor.selector, 999900009999000099));
-        // dsce.mintDsc(amountDscToMint);
-        // vm.stopPrank();
     }
 
     function testCanMintDsc() public depositedCollateral {
@@ -294,6 +317,39 @@ contract DSCEngineTest is Test {
     ////////////////////////////////////
     // redeemCollateral Tests /////////
     ////////////////////////////////////
+
+    function testRevertsIfTransferFails() public {
+        FailingERC20Mock failingToken = new FailingERC20Mock("FailingToken", "FTK", address(this), AMOUNT_COLLATERAL);
+        failingToken.mint(USER, AMOUNT_COLLATERAL);
+
+        // Step 2: Add the token to the allowed tokens mapping in the DSCEngine contract
+        address[] memory tokenAddresses2 = new address[](1);
+        address[] memory priceFeedAddresses2 = new address[](1);
+        tokenAddresses2[0] = address(failingToken);
+        priceFeedAddresses2[0] = ethUsdPriceFeed; // Use an existing price feed for simplicity
+        DSCEngine newDsce2 = new DSCEngine(tokenAddresses2, priceFeedAddresses2, address(failingToken));
+
+        vm.startPrank(address(dsce)); // Simulate the owner
+        // console the owner of dsc
+        dsc.transferOwnership(address(newDsce2));
+        vm.stopPrank(); 
+
+        vm.startPrank(USER);
+        failingToken.approve(address(newDsce2), AMOUNT_COLLATERAL);
+        // Approve allowance of dsc to dsce
+        DecentralizedStableCoin(dsc).approve(address(newDsce2), 1e18);
+
+        // newDsce2.depositCollateralAndMintDsc(address(failingToken), AMOUNT_COLLATERAL, AMOUNT_DSC); 
+
+        newDsce2.depositCollateral(address(failingToken), AMOUNT_COLLATERAL);
+        // newDsce2.mintDsc(1e18); // Mint a small amount of DSC
+
+        failingToken.setShouldFail(true);
+
+        vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
+        newDsce2.burnDsc(1e18); // Attempt to burn DSC
+        vm.stopPrank();
+    }
 
     function testRevertsIfRedeemAmountIsZero() public {
         vm.startPrank(USER);
@@ -343,133 +399,6 @@ contract DSCEngineTest is Test {
         uint256 userBalance = dsc.balanceOf(USER);
         assertEq(userBalance, 0);
     }
-
-    function testBurnDscWithInsufficientBalance() public {
-        // ********************GETTING THINGS READY **************************** */
-
-        // Deposit collateral and mint DSC
-
-        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL); // 10 ether
-        dsce.depositCollateral(weth, AMOUNT_COLLATERAL); // 10 ether
-        // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
-        console.log("Allowance of DSC coming from tester burner to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
-
-        // Approve the tokens this contract is about to liquidate
-        uint256 amountDscToMint = (AMOUNT_DSC/10000)*2; // 2e18;
-        // Approve the amount of DSC Token to the DSCEngine
-        DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
-        console.log("Just before next stepi");
-        dsce.mintDsc(amountDscToMint/2);
-        // Console the allowances
-        console.log("Allowance of DSC coming from tester burnes to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
-
-        // ************************************************ */
-
-
-        // vm.startPrank(USER);
-        // ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
-        // dsce.depositCollateral(weth, AMOUNT_COLLATERAL);
-        // dsce.mintDsc(1e18); // Mint a small amount of DSC
-        // dsce.burnDsc(1e18); 
-        console.log("Was able to burn");
-        vm.expectRevert();
-        // vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
-        dsce.burnDsc(2e18); // Attempt to burn more than minted
-        // vm.stopPrank();
-    }
-
-    ////////////////////////////////////
-    // liquidation Tests ///////////////
-    ////////////////////////////////////
-
-    function testCantLiquidateGoodHealthFactor() public depositedCollateral mintedDsc {
-        vm.startPrank(address(this));
-        vm.expectRevert(DSCEngine.DSCEngine__HealthFactorOk.selector);
-        dsce.liquidate(weth, USER, AMOUNT_DSC); // 10,000e18
-        vm.stopPrank();
-    }
-
-    function testRevertsIfLiquidateLessThanNecessary() public depositedCollateral mintedDsc {
-        // At this point of the test, $10,000 DSC has been minted with 10 ether collateral
-        // Manipulate price feed to make USER's position unhealthy
-        int256 newPrice = 2000e8/2; // Lower price to make position unhealthy
-        vm.mockCall(ethUsdPriceFeed, abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector), abi.encode(0, newPrice, 0, 0, 0));
-        // According to the new price, the collateral value is now $5,000
-        // The total DSC minted is $10,000
-        // The health factor is 0.5
-
-        // ********************GETTING THINGS READY FOR LIQUIDATOR **************************** */
-
-        // Deposit collateral and mint DSC
-
-        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 20 ether
-        dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2); // 20 ether
-        // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
-        console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
-
-        // Approve the tokens this contract is about to liquidate
-        uint256 amountDscToMint = AMOUNT_DSC; // 10000e18;
-        // Approve the amount of DSC Token to the DSCEngine
-        DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
-        console.log("Just before next step");
-        dsce.mintDsc(amountDscToMint);
-        // Console the allowances
-        console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
-
-        // ************************************************ */
-
-        // Liquidate USER's position
-        vm.startPrank(address(this));
-        // Check allowance before liquidation
-        uint256 allowanceBeforeLiquidation = DecentralizedStableCoin(dsc).allowance(USER, address(dsce));
-        console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation/1e18);
-
-        vm.expectRevert(DSCEngine.DSCEngine__HealthFactorNotImproved.selector);
-        uint256 endingUserHealthFactor = dsce.liquidate(weth, USER, (AMOUNT_DSC/2)); // 10,000e18 / 2 = 5,000e18  
-        vm.stopPrank();
-    }
-
-    // function testCanLiquidateUnhealthyPosition() public depositedCollateral mintedDsc {
-    //     // At this point of the test, $10,000 DSC has been minted with 10 ether collateral
-    //     // Manipulate price feed to make USER's position unhealthy
-    //     int256 newPrice = 2000e8/2; // Lower price to make position unhealthy
-    //     vm.mockCall(ethUsdPriceFeed, abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector), abi.encode(0, newPrice, 0, 0, 0));
-    //     // According to the new price, the collateral value is now $5,000
-    //     // The total DSC minted is $10,000
-    //     // The health factor is 0.5
-
-    //     // ********************GETTING THINGS READY FOR LIQUIDATOR **************************** */
-
-    //     // Deposit collateral and mint DSC
-
-    //     ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 20 ether
-    //     dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2); // 20 ether
-    //     // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
-    //     console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
-
-    //     // Approve the tokens this contract is about to liquidate
-    //     uint256 amountDscToMint = AMOUNT_DSC; // 10000e18;
-    //     // Approve the amount of DSC Token to the DSCEngine
-    //     DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
-    //     console.log("Just before next step");
-    //     dsce.mintDsc(amountDscToMint);
-    //     // Console the allowances
-    //     console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
-
-    //     // ************************************************ */
-
-    //     // Liquidate USER's position
-    //     vm.startPrank(address(this));
-    //     // Check allowance before liquidation
-    //     uint256 allowanceBeforeLiquidation = DecentralizedStableCoin(dsc).allowance(USER, address(dsce));
-    //     console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation/1e18);
-
-    //     uint256 endingUserHealthFactor = dsce.liquidate(weth, USER, 7250e18); // 10,000e18 / 2 = 5,000e18  9091e18 not working :( 7750 it is
-    //     vm.stopPrank();
-
-    //     // Verify liquidation
-    //     assertEq(endingUserHealthFactor, 1e18); // 1 means healthy
-    // }
 
     ////////////////////////
     // healthFactor Tests //
@@ -524,113 +453,108 @@ contract DSCEngineTest is Test {
     }
 
     ////////////////////////////////////
-    // Additional Tests ////////////////
+    // liquidation Tests ///////////////
     ////////////////////////////////////
 
-    function testRevertsIfRedeemMoreThanDeposited() public depositedCollateral {
-        vm.startPrank(USER);
-        vm.expectRevert(DSCEngine.DSCEngine__CanOnlyLiquidateAmountCollateral.selector);
-        dsce.redeemCollateral(weth, AMOUNT_COLLATERAL * 2); // Attempt to redeem more than deposited
+    function testMustImproveHealthFactorOnLiquidation() public depositedCollateral mintedDsc {
+        // At this point of the test, $10,000 DSC has been minted with 10 ether collateral
+        // Manipulate price feed to make USER's position unhealthy
+        int256 newPrice = 2000e8/2; // Lower price to make position unhealthy
+        vm.mockCall(ethUsdPriceFeed, abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector), abi.encode(0, newPrice, 0, 0, 0));
+        // According to the new price, the collateral value is now $5,000
+        // The total DSC minted is $10,000
+        // The health factor is 0.5
+
+        // ********************GETTING THINGS READY FOR LIQUIDATOR **************************** */
+
+        // Deposit collateral and mint DSC
+
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 20 ether
+        dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2); // 20 ether
+        // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
+        console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
+
+        // Approve the tokens this contract is about to liquidate
+        uint256 amountDscToMint = AMOUNT_DSC; // 10000e18;
+        // Approve the amount of DSC Token to the DSCEngine
+        DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
+        console.log("Just before next step");
+        dsce.mintDsc(amountDscToMint);
+        // Console the allowances
+        console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
+
+        // ************************************************ */
+
+        // Liquidate USER's position
+        vm.startPrank(address(this));
+        // Check allowance before liquidation
+        uint256 allowanceBeforeLiquidation = DecentralizedStableCoin(dsc).allowance(USER, address(dsce));
+        console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation/1e18);
+
+        vm.expectRevert(DSCEngine.DSCEngine__HealthFactorNotImproved.selector);
+        dsce.liquidate(weth, USER, (AMOUNT_DSC/2)); // 10,000e18 / 2 = 5,000e18  
         vm.stopPrank();
     }
 
-    // function testRevertsIfLiquidateLessThanNecessary() public depositedCollateral mintedDsc {
-    //     // At this point of the test, $10,000 DSC has been minted with 10 ether collateral
-    //     // Manipulate price feed to make USER's position unhealthy
-    //     int256 newPrice = 2000e8/2; // Lower price to make position unhealthy
-    //     vm.mockCall(ethUsdPriceFeed, abi.encodeWithSelector(AggregatorV3Interface.latestRoundData.selector), abi.encode(0, newPrice, 0, 0, 0));
-    //     // According to the new price, the collateral value is now $5,000
-    //     // The total DSC minted is $10,000
-    //     // The health factor is 0.5
-
-    //     // ********************GETTING THINGS READY FOR LIQUIDATOR **************************** */
-
-    //     // Deposit collateral and mint DSC
-
-    //     ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL*2); // 20 ether
-    //     dsce.depositCollateral(weth, AMOUNT_COLLATERAL*2); // 20 ether
-    //     // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
-    //     console.log("Allowance of DSC coming from liquidator1 to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
-
-    //     // Approve the tokens this contract is about to liquidate
-    //     uint256 amountDscToMint = AMOUNT_DSC; // 10000e18;
-    //     // Approve the amount of DSC Token to the DSCEngine
-    //     DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
-    //     console.log("Just before next step");
-    //     dsce.mintDsc(amountDscToMint);
-    //     // Console the allowances
-    //     console.log("Allowance of DSC coming from liquidator to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
-
-    //     // ************************************************ */
-
-    //     // Liquidate USER's position
-    //     vm.startPrank(address(this));
-    //     // Check allowance before liquidation
-    //     uint256 allowanceBeforeLiquidation = DecentralizedStableCoin(dsc).allowance(USER, address(dsce));
-    //     console.log("Allowance of DSC to DSCEngine before liquidation:", allowanceBeforeLiquidation/1e18);
-
-    //     // Expect revert because the amount to liquidate is less than necessary
-    //     // vm.expectRevert(DSCEngine.DSCEngine__HealthFactorNotImproved.selector);
-    //     uint256 endingUserHealthFactor = dsce.liquidate(weth, USER, (AMOUNT_DSC/30)); // 10,000e18 / 10 = 1,000e18  
-    //     console.log("endingUserHealthFactoryx", endingUserHealthFactor/1e18);
-    //     vm.stopPrank();
-    // }
-
-    function testRevertsIfTransferFromFails() public {
-        // Step 1: Deploy the FailingERC20Mock token
-        FailingERC20Mock failingToken = new FailingERC20Mock("FailingToken", "FT", address(this), AMOUNT_COLLATERAL);
-        failingToken.mint(USER, AMOUNT_COLLATERAL);
-
-        // Step 2: Add the token to the allowed tokens mapping in the DSCEngine contract
-        address[] memory tokenAddresses1 = new address[](1);
-        address[] memory priceFeedAddresses1 = new address[](1);
-        tokenAddresses1[0] = address(failingToken);
-        priceFeedAddresses1[0] = ethUsdPriceFeed; // Use an existing price feed for simplicity
-        DSCEngine newDsce = new DSCEngine(tokenAddresses1, priceFeedAddresses1, address(dsc));
-
-        // Step 3: Set the mock token to fail the transfer
-        failingToken.setShouldFail(true);
-
-        // Step 4: Test the depositCollateral function
-        vm.startPrank(USER);
-        failingToken.approve(address(newDsce), AMOUNT_COLLATERAL);
-
-        vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
-        newDsce.depositCollateral(address(failingToken), AMOUNT_COLLATERAL);
+    function testCantLiquidateGoodHealthFactor() public depositedCollateral mintedDsc {
+        vm.startPrank(address(this));
+        vm.expectRevert(DSCEngine.DSCEngine__HealthFactorOk.selector);
+        dsce.liquidate(weth, USER, AMOUNT_DSC); // 10,000e18
         vm.stopPrank();
     }
 
-    function testBurnDscTransferFailed() public {
-        FailingERC20Mock failingToken = new FailingERC20Mock("FailingToken", "FTK", address(this), AMOUNT_COLLATERAL);
-        failingToken.mint(USER, AMOUNT_COLLATERAL);
-
-        // Step 2: Add the token to the allowed tokens mapping in the DSCEngine contract
-        address[] memory tokenAddresses2 = new address[](1);
-        address[] memory priceFeedAddresses2 = new address[](1);
-        tokenAddresses2[0] = address(failingToken);
-        priceFeedAddresses2[0] = ethUsdPriceFeed; // Use an existing price feed for simplicity
-        DSCEngine newDsce2 = new DSCEngine(tokenAddresses2, priceFeedAddresses2, address(failingToken));
-
-        vm.startPrank(address(dsce)); // Simulate the owner
-        // console the owner of dsc
-        dsc.transferOwnership(address(newDsce2));
-        vm.stopPrank(); 
-
+    modifier liquidated() {
         vm.startPrank(USER);
-        failingToken.approve(address(newDsce2), AMOUNT_COLLATERAL);
-        // Approve allowance of dsc to dsce
-        DecentralizedStableCoin(dsc).approve(address(newDsce2), 1e18);
-
-        // newDsce2.depositCollateralAndMintDsc(address(failingToken), AMOUNT_COLLATERAL, AMOUNT_DSC); 
-
-        newDsce2.depositCollateral(address(failingToken), AMOUNT_COLLATERAL);
-        // newDsce2.mintDsc(1e18); // Mint a small amount of DSC
-
-        failingToken.setShouldFail(true);
-
-        vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
-        newDsce2.burnDsc(1e18); // Attempt to burn DSC
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL);
+        dsce.depositCollateralAndMintDsc(weth, AMOUNT_COLLATERAL, amountToMint);
         vm.stopPrank();
+        int256 ethUsdUpdatedPrice = 18e8; // 1 ETH = $18
+
+        MockV3Aggregator(ethUsdPriceFeed).updateAnswer(ethUsdUpdatedPrice);
+        uint256 userHealthFactor = dsce.getHealthFactor(USER);
+
+        ERC20Mock(weth).mint(liquidator, collateralToCover);
+
+        vm.startPrank(liquidator);
+        ERC20Mock(weth).approve(address(dsce), collateralToCover);
+        dsce.depositCollateralAndMintDsc(weth, collateralToCover, amountToMint);
+        dsc.approve(address(dsce), amountToMint);
+        dsce.liquidate(weth, USER, amountToMint); // We are covering their whole debt
+        vm.stopPrank();
+        _;
+    }
+
+    function testLiquidationPayoutIsCorrect() public liquidated {
+        uint256 liquidatorWethBalance = ERC20Mock(weth).balanceOf(liquidator);
+        uint256 expectedWeth = dsce.getTokenAmountFromUsd(weth, amountToMint)
+            + (dsce.getTokenAmountFromUsd(weth, amountToMint) / dsce.getLiquidationBonus());
+        uint256 hardCodedExpected = 6111_111_111_050_000_000; // 6111111111050000000
+        assertEq(liquidatorWethBalance, hardCodedExpected);
+        assertEq(liquidatorWethBalance, expectedWeth);
+    }
+
+    function testUserStillHasSomeEthAfterLiquidation() public liquidated {
+        // Get how much WETH the user lost
+        uint256 amountLiquidated = dsce.getTokenAmountFromUsd(weth, amountToMint)
+            + (dsce.getTokenAmountFromUsd(weth, amountToMint) / dsce.getLiquidationBonus());
+
+        uint256 usdAmountLiquidated = dsce.getUsdValue(weth, amountLiquidated);
+        uint256 expectedUserCollateralValueInUsd = dsce.getUsdValue(weth, AMOUNT_COLLATERAL) - (usdAmountLiquidated);
+
+        (, uint256 userCollateralValueInUsd) = dsce.getAccountInformation(USER);
+        uint256 hardCodedExpectedValue = 70_000_000_001_100_000_000; // 70000000001100000000
+        assertEq(userCollateralValueInUsd, expectedUserCollateralValueInUsd);
+        assertEq(userCollateralValueInUsd, hardCodedExpectedValue);
+    }
+
+    function testLiquidatorTakesOnUsersDebt() public liquidated {
+        (uint256 liquidatorDscMinted,) = dsce.getAccountInformation(liquidator);
+        assertEq(liquidatorDscMinted, amountToMint);
+    }
+
+    function testUserHasNoMoreDebt() public liquidated {
+        (uint256 userDscMinted,) = dsce.getAccountInformation(user);
+        assertEq(userDscMinted, 0);
     }
 
     ///////////////////////////////////
@@ -692,6 +616,43 @@ contract DSCEngineTest is Test {
         assertEq(actualLiquidationPrecision, expectedLiquidationPrecision);
     }
 
-    PENDING LIQUIDATE TESTS
+    ////////////////////////////////////
+    // Additional Tests ////////////////
+    ////////////////////////////////////
+
+    function testRevertsIfRedeemMoreThanDeposited() public depositedCollateral {
+        vm.startPrank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__CanOnlyLiquidateAmountCollateral.selector);
+        dsce.redeemCollateral(weth, AMOUNT_COLLATERAL * 2); // Attempt to redeem more than deposited
+        vm.stopPrank();
+    }
+
+    function testBurnDscWithInsufficientBalance() public {
+        // ********************GETTING THINGS READY **************************** */
+
+        // Deposit collateral and mint DSC
+
+        ERC20Mock(weth).approve(address(dsce), AMOUNT_COLLATERAL); // 10 ether
+        dsce.depositCollateral(weth, AMOUNT_COLLATERAL); // 10 ether
+        // At this point dsce cannot deposit more collateral because it has already deposited the maximum amount
+        console.log("Allowance of DSC coming from tester burner to DSCEngine", ERC20Mock(weth).allowance(address(this), address(dsce))/1e18);
+
+        // Approve the tokens this contract is about to liquidate
+        uint256 amountDscToMint = (AMOUNT_DSC/10000)*2; // 2e18;
+        // Approve the amount of DSC Token to the DSCEngine
+        DecentralizedStableCoin(dsc).approve(address(dsce), amountDscToMint);
+        console.log("Just before next stepi");
+        dsce.mintDsc(amountDscToMint/2);
+        // Console the allowances
+        console.log("Allowance of DSC coming from tester burnes to DSCEngine", DecentralizedStableCoin(dsc).allowance(address(this), address(dsce))/1e18);
+
+        // ************************************************ */
+        console.log("Was able to burn");
+        vm.expectRevert();
+        // vm.expectRevert(DSCEngine.DSCEngine__TransferFailed.selector);
+        dsce.burnDsc(2e18); // Attempt to burn more than minted
+        // vm.stopPrank();
+    }    
+
 }
 
