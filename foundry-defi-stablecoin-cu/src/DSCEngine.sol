@@ -168,6 +168,10 @@ contract DSCEngine is ReentrancyGuard {
         isAllowedToken(tokenCollateralAddress) 
         nonReentrant 
         {
+            // Check allowance
+            uint256 allowance = IERC20(tokenCollateralAddress).allowance(msg.sender, address(this));
+            require(allowance >= amountCollateral, "Insufficient allowance");
+
             s_collateralDeposited[msg.sender][tokenCollateralAddress] += amountCollateral;
             console.log("sender in depcollateral is", msg.sender);
             console.log("colateral depositado: ",s_collateralDeposited[msg.sender][tokenCollateralAddress]/1e18);
