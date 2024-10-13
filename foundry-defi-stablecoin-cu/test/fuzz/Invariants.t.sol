@@ -80,9 +80,26 @@ contract Invariants is StdInvariant, Test {
         assert (wethValue + wbtcValue >= totalSupply);
     }
 
-    // function invariant_getterFunctionsShouldNotRevert() public view {
-    //     // Check if the getter functions revert
-    //     dsce.getUsdValue(weth, 0);
-    //     dsce.getUsdValue(wbtc, 0);
-    // }
+    function invariant_getterFunctionsShouldNotRevert(address sender, uint256 amount) public view {
+        dsce.getAccountCollateralValue(sender);
+        dsce.getAccountInformation(sender);
+        dsce.getAdditionalFeedPrecision();
+        dsce.getCollateralBalanceOfUser(sender,weth);
+        dsce.getCollateralBalanceOfUser(sender,wbtc);
+        dsce.getCollateralTokenPriceFeed(weth);
+        dsce.getCollateralTokenPriceFeed(wbtc);
+        dsce.getCollateralTokens();
+        dsce.getDsc();
+        dsce.getHealthFactor(sender);
+        dsce.getLiquidationBonus();
+        dsce.getLiquidationPrecision();
+        dsce.getLiquidationThreshold();
+        dsce.getMinHealthFactor();
+        dsce.getPrecision();
+        dsce.getTokenAmountFromUsd(sender,amount);
+
+        // Check if the getter functions revert
+        dsce.getUsdValue(weth, 0);
+        dsce.getUsdValue(wbtc, 0);
+    }
 }
