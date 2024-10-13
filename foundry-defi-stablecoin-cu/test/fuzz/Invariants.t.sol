@@ -33,12 +33,16 @@ contract Invariants is StdInvariant, Test {
     Handler handler;
 
     uint256 MAX_PRICE_SIZE = type(uint96).max;
+    // additional precision
+    uint256 constant PRECISION = 1e18;
 
     function setUp() public {
         deployer = new DeployDSC();
         (dsc, dsce, config) = deployer.run();
         (,,weth,wbtc,) = config.activeNetworkConfig();
         console.log("DSCEngine Address: ", address(dsce));
+        // console the total supply of DSC
+        console.log("INITIAL Total Supply: ", dsc.totalSupply());
         console.log("dsc Address: ", address(dsc));
         handler = new Handler(dsce, dsc);
         targetContract(address(handler));
@@ -59,8 +63,10 @@ contract Invariants is StdInvariant, Test {
             totalWbtcDeposited = 1;
         }
         
-        totalWethDeposited = bound(totalWethDeposited, 1, MAX_PRICE_SIZE);
-        totalWbtcDeposited = bound(totalWbtcDeposited, 1, MAX_PRICE_SIZE);
+        // totalWethDeposited = bound(totalWethDeposited, 1, MAX_PRICE_SIZE);
+        // totalWbtcDeposited = bound(totalWbtcDeposited, 1, MAX_PRICE_SIZE);
+        // console.log("Total WETH Deposited: ", totalWethDeposited);
+        // console.log("Total WBTC Deposited: ", totalWbtcDeposited);
 
         uint256 wethValue = dsce.getUsdValue(weth, totalWethDeposited);
         uint256 wbtcValue = dsce.getUsdValue(wbtc, totalWbtcDeposited);
@@ -69,6 +75,8 @@ contract Invariants is StdInvariant, Test {
         console.log("WBTC Value: ", wbtcValue);
         console.log("Total Supply: ", totalSupply);
 
+        console.log(" Times mint called: ", handler.timesMintIsCalled());
+        // uint256 reduced = totalSupply/PRECISION;
         assert (wethValue + wbtcValue >= totalSupply);
     }
 
