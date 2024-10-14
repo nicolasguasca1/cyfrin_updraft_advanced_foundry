@@ -80,26 +80,32 @@ contract Invariants is StdInvariant, Test {
         assert (wethValue + wbtcValue >= totalSupply);
     }
 
-    function invariant_getterFunctionsShouldNotRevert(address sender, uint256 amount) public view {
-        dsce.getAccountCollateralValue(sender);
-        dsce.getAccountInformation(sender);
+    function invariant_getterFunctionsShouldNotRevert() public view {
+        uint256 totalSupply = dsc.totalSupply();
+        dsce.getAccountCollateralValue(msg.sender);
+        dsce.getAccountInformation(msg.sender);
         dsce.getAdditionalFeedPrecision();
-        dsce.getCollateralBalanceOfUser(sender,weth);
-        dsce.getCollateralBalanceOfUser(sender,wbtc);
+        dsce.getCollateralBalanceOfUser(msg.sender,weth);
+        dsce.getCollateralBalanceOfUser(msg.sender,wbtc);
         dsce.getCollateralTokenPriceFeed(weth);
         dsce.getCollateralTokenPriceFeed(wbtc);
         dsce.getCollateralTokens();
         dsce.getDsc();
-        dsce.getHealthFactor(sender);
+        dsce.getHealthFactor(msg.sender);
         dsce.getLiquidationBonus();
         dsce.getLiquidationPrecision();
         dsce.getLiquidationThreshold();
         dsce.getMinHealthFactor();
         dsce.getPrecision();
-        dsce.getTokenAmountFromUsd(sender,amount);
+        // Ensure values are not zero
+        if (totalSupply == 0) {
+            totalSupply = 1;
+        }
+        dsce.getTokenAmountFromUsd(weth,totalSupply);
+        dsce.getTokenAmountFromUsd(wbtc,totalSupply);
 
         // Check if the getter functions revert
-        dsce.getUsdValue(weth, 0);
-        dsce.getUsdValue(wbtc, 0);
+        dsce.getUsdValue(weth, totalSupply);
+        dsce.getUsdValue(wbtc, totalSupply);
     }
 }
