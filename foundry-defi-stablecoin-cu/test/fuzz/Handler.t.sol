@@ -8,6 +8,7 @@ import {DSCEngine} from "../../src/DSCEngine.sol";
 import {DecentralizedStableCoin} from "../../src/DecentralizedStableCoin.sol";
 import {ERC20Mock} from "lib/openzeppelin-contracts/contracts/mocks/token/ERC20Mock.sol";
 import {console} from "forge-std/console.sol";
+import {MockV3Aggregator} from "../mocks/MockV3Aggregator.sol";
 
 contract Handler is Test {
     DSCEngine dsce;
@@ -15,10 +16,14 @@ contract Handler is Test {
 
     ERC20Mock weth;
     ERC20Mock wbtc;
-    uint256 MAX_DEPOSIT_SIZE = type(uint96).max;
-    uint256 public timesMintIsCalled;
 
+    uint256 public timesMintIsCalled;
     address[] usersWithCollateralDeposited;
+    MockV3Aggregator ethUsdPriceFeed;
+
+    uint256 MAX_DEPOSIT_SIZE = type(uint96).max;
+
+
 
     constructor(DSCEngine _dscEngine, DecentralizedStableCoin _dsc) {
         dsce = _dscEngine;
@@ -27,6 +32,8 @@ contract Handler is Test {
         address[] memory collateralTokens = dsce.getCollateralTokens();
         weth = ERC20Mock(collateralTokens[0]);
         wbtc = ERC20Mock(collateralTokens[1]);
+
+        ethUsdPriceFeed = MockV3Aggregator(dsce.getCollateralTokenPriceFeed(address(weth)));
     }
 
     function mintDsc(uint256 amount, uint256 addressSeed) public {
@@ -82,6 +89,12 @@ contract Handler is Test {
 
         dsce.redeemCollateral(address(collateral), amountCollateral);
     }
+
+    // This breaks our invariant test suite!!! Because protocol at this point is allowing collateralization between 110% and 200%. Outside of this range code is broken.
+    // function updateCollateralPrice(uint96 newPrice) public {
+    //     int256 newPriceInt = int256(uint256(newPrice));
+    //     ethUsdPriceFeed.updateAnswer(newPriceInt);
+    // }
 
     // Helper function
     function _getCollateralFromSeed(uint256 collateralSeed) private view returns (ERC20Mock) {
