@@ -12,3 +12,9 @@
 - Added a bunch of view functions
 
 1. What are our invariants/properties
+
+Things to teach
+
+1. Some proper oracle use
+2. Write more tests
+3. Smart Contract Audit Preparation
